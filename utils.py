@@ -1,101 +1,83 @@
-# import warnings
-# warnings.filterwarnings("ignore", "\nPyarrow", DeprecationWarning)
-import torch
+
 from torch.utils.data import DataLoader
-from torchvision.transforms import transforms
-from data_setup import DatasetMaker
-from model_builder import build_fasterrcnn_model
-from engin import train_step , test_step 
-from utils import show_imgs
-from colorama import Fore
-from utils import test_model
+from matplotlib import pyplot as plt
+from matplotlib import patches
+import torchvision.ops as ops
+import torch 
+import numpy as np
+
+class UnNormalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+
+        for t, m, s in zip(tensor, self.mean, self.std):
+            t.mul_(s).add_(m)
+        return tensor
+
+unorm = UnNormalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 
 
-root_dir = r"D:\deep_learning\Torch\Mask Detection\face-mask-detection"
+def display_image(image, targets):
+    fig, ax = plt.subplots(1)
+    unnormalized_image = unorm(image).cpu().permute(1, 2, 0).numpy()
+    ax.imshow(unnormalized_image)
+    boxes = targets['boxes']
+    labels = targets['labels']
+    label_color = ['green', 'red', 'purple' ]
+    for j, box in enumerate(boxes):
+        xmin, ymin, xmax, ymax = box
+        rect = patches.Rectangle((xmin, ymin),( xmax - xmin), (ymax - ymin), linewidth=2, edgecolor=label_color[labels[j] - 1], facecolor='none')
+        ax.add_patch(rect)
+    plt.show()
 
-transform = transforms.Compose([
-    transforms.Resize((224,224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485 , 0.456 , 0.406] , std=[0.229, 0.224, 0.225])
-])
 
-collate_fn = lambda batch: tuple(zip(*batch))
+def show_imgs(dataloader):
+    for i, batch in enumerate(dataloader):
+        if i == 3:
+            for j in range(len(batch[0])):
+                image = batch[0][j]
+                targets = batch[1][j]
+                display_image(image, targets)
+                if j==4:
+                    break
 
-dataset = DatasetMaker(root_dir=root_dir , transform=transform)
-dataloader = DataLoader(dataset ,  shuffle=True, collate_fn=collate_fn , batch_size=32)
+def test_model(model: torch.nn.Module,
+               test_dataloader:DataLoader,
+               device: torch.device
+               ):
 
-train_size = int(len(dataset) * 0.95)
-test_size = len(dataset) - train_size
+    images, targets = next(iter(test_dataloader))
 
-train_data, test_data = torch.utils.data.random_split(dataset, [train_size, test_size])
+    # Run the model on the minibatch of images
+    model.eval()
+    with torch.no_grad():
+        images = list([image.to(device) for image in images])
+        outputs = model(images)
 
-print("Train data size: ", len(train_data))
-print("Test data size: ", len(test_data))
-
-train_dataloader = DataLoader(train_data, batch_size=32 ,  shuffle=True, collate_fn=collate_fn)
-test_dataloader = DataLoader(test_data, batch_size=32 ,  shuffle=True, collate_fn=collate_fn)
-
-# show_imgs(train_dataloader)
-
-device = torch.device('cuda') 
-
-model = build_fasterrcnn_model(device)
-
-params = model.parameters()
-
-optimizer = torch.optim.AdamW(params, lr=1e-4,
-                            amsgrad=True,
-                            weight_decay=1e-6)
-
-def train(model: torch.nn.Module, 
-          train_dataloader: torch.utils.data.DataLoader, 
-          test_dataloader: torch.utils.data.DataLoader, 
-          optimizer: torch.optim.Optimizer,
-          epochs: int,
-          device: torch.device,
-          print_freq:int):
-    
-    
-    for epoch in range(epochs):
-        
-        train_loss = train_step(model,
-                                train_dataloader,
-                                optimizer,
-                                device,
-                                print_freq
-                                )
-        test_loss = test_step(model,
-                              test_dataloader,
-                              device)
+        for i, image in enumerate(images):
+            # Extract the predicted bounding boxes and labels for the current image
+            boxes = outputs[i]['boxes'].cpu().numpy()
+    #         scores = outputs[i]['scores'].cpu().numpy()
+            labels = outputs[i]['labels'].cpu().numpy()
             
-        print(
-            Fore.YELLOW + F"Epoch: {epoch}" ,
-            Fore.GREEN +f"|train loss: {train_loss:.4f} | ",
-            Fore.LIGHTRED_EX +f"|test loss: {test_loss:.4f}"
-            )
-            
-            
-        resutls = {"train_loss" : [],
-                   "test loss" : []}
-        
-        resutls["train_loss"].append(train_loss)                      
-        resutls["test_loss"].append(test_loss)
-        
-epochs = 10      
-print_freq = 10
+            # Apply non-maximum suppression to remove duplicate detections
+    #         keep = ops.nms(torch.from_numpy(boxes), torch.from_numpy(scores), iou_threshold=0.1)
 
-def main():
-    train(model,
-          train_dataloader,
-          test_dataloader,
-          optimizer,
-          epochs,
-          device,
-          print_freq)
-    
-    test_model(model,
-               test_dataloader,
-               device)
-        
-if __name__ == "__main__":
-    main()
+            # Keep only the top-scoring detections after NMS
+    #         boxes = boxes[keep]
+    # #         print(boxes.shape)
+    #         scores = scores[keep]
+    #         labels = labels[keep]
+
+            fig, ax = plt.subplots(1)
+            ax.imshow(unorm(image).cpu().permute(1, 2, 0))
+            label_color = ['green', 'red', 'purple' ]
+
+            for box, label in zip(boxes, labels):
+                x1, y1, x2, y2 = box.astype(np.int)
+                ax.add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor=label_color[label - 1], linewidth=2))
+
+            plt.show()
