@@ -8,6 +8,7 @@ from model_builder import build_fasterrcnn_model
 from engin import train_step , test_step 
 from utils import show_imgs
 from colorama import Fore
+from utils import test_model
 
 root_dir = r"D:\deep_learning\Torch\Mask Detection\face-mask-detection"
 
@@ -90,6 +91,9 @@ def main():
           epochs,
           device,
           print_freq)
-        
+    
+    test_model(model,
+           test_dataloader,
+           device)
 if __name__ == "__main__":
     main()
